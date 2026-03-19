@@ -1,80 +1,76 @@
 import pygit2
+import os
+from variable import REPO_PATH
 
-repo_path = r"C:\Users\Yogendra Fegade\python-mini-projects"
+# Initialize repository
+try:
+    repo = pygit2.Repository(REPO_PATH)
+except pygit2.GitError:
+    print(f"Error: Could not find a valid Git repository at {REPO_PATH}")
+    exit()
 
-repo = pygit2.Repository(repo_path)
-
+# Get the latest commit
 commit = repo.head.peel()
 
-print("Latest Commit ID:", commit.id)
-print("Message:", commit.message)
-
-#  Check number of parents
+# --- Analysis Logic ---
 parent_count = len(commit.parents)
+commit_type = "MERGE commit" if parent_count > 1 else "NORMAL commit"
 
-print("Number of Parents:", parent_count)
+print(f"--- Git Analysis Tool ---")
+print(f"Message: {commit.message.strip()}")
+print(f"Type:    {commit_type}")
+print("-" * 30)
 
-if parent_count > 1:
-    print("This is a MERGE commit")
+# Determine the trees to compare
+if parent_count > 0:
+    # Compare against the first parent (main line of history)
+    tree_old = commit.parents[0].tree
+    tree_new = commit.tree
+    diff = repo.diff(tree_old, tree_new)
 else:
-    print("This is a NORMAL commit")
+    # Handle initial commit (no parents)
+    # We compare an empty tree to the current commit tree
+    diff = commit.tree.diff_to_tree()
 
-
-#  Get parents
-parent1 = commit.parents[0]   # main branch before merge
-parent2 = commit.parents[1]   # merged branch (test)
-
-# Get trees (snapshot of files)
-tree_old = parent1.tree
-tree_new = commit.tree
-
-#  Generate diff
-diff = repo.diff(tree_old, tree_new)
-
-print("\nDiff generated successfully!\n")
-
-print("Changed Files:\n")
-
+# --- File Level Output ---
+print("\nChanged Files:")
 for patch in diff:
-    file_path = patch.delta.new_file.path or patch.delta.old_file.path
+    status_map = {
+        pygit2.GIT_DELTA_ADDED: "A",
+        pygit2.GIT_DELTA_DELETED: "D",
+        pygit2.GIT_DELTA_MODIFIED: "M",
+        pygit2.GIT_DELTA_RENAMED: "R"
+    }
+    status = status_map.get(patch.delta.status, "?")
+    file_path = patch.delta.new_file.path
+    print(f"[{status}] {file_path}")
 
-    #  Detect change type
-    if patch.delta.status == pygit2.GIT_DELTA_ADDED:
-        change_type = "A"
-    elif patch.delta.status == pygit2.GIT_DELTA_DELETED:
-        change_type = "D"
-    else:
-        change_type = "M"
-
-    print(f"{change_type} {file_path}")
-
-print("\nLine Changes:\n")
-
+# --- Line Level Output ---
+print("\nLine Changes:")
 for patch in diff:
-    file_path = patch.delta.new_file.path or patch.delta.old_file.path
+    file_path = patch.delta.new_file.path
     print(f"\nFile: {file_path}")
 
     for hunk in patch.hunks:
-        old_line_no = hunk.old_start
-        new_line_no = hunk.new_start
+        # Pointers for tracking line numbers
+        old_ln = hunk.old_start
+        new_ln = hunk.new_start
 
         for line in hunk.lines:
-
             content = line.content.strip()
-
-            #  Removed line
+            
+            # Identify the change type
             if line.origin == '-':
-                if content:
-                    print(f"Line {old_line_no} (-): {content}")
-                old_line_no += 1
-
-            #  Added line
+                if content: # Only print non-empty lines
+                    print(f"Line {old_ln} (-): {content}")
+                old_ln += 1
+            
             elif line.origin == '+':
                 if content:
-                    print(f"Line {new_line_no} (+): {content}")
-                new_line_no += 1
-
-            #  Context line
+                    print(f"Line {new_ln} (+): {content}")
+                new_ln += 1
+            
             else:
-                old_line_no += 1
-                new_line_no += 1
+                # This is a context line (no change)
+                old_ln += 1
+                new_ln += 1
